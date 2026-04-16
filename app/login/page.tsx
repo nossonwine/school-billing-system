@@ -16,6 +16,20 @@ export default function Login() {
     setError("");
     setLoading(true);
 
+    const res = await signIn("credentials", {
+      username,
+      password,
+      redirect: false,
+    });
+
+    if (res?.error) {
+      setError("Invalid login. Please check exact spelling and capitals.");
+      setLoading(false);
+    } else {
+      // FORCES a hard browser reload so the security cookie is immediately recognized
+      window.location.href = "/";
+    }
+  };
     // This securely sends the credentials to the NextAuth checkpoint we built earlier
     const res = await signIn("credentials", {
       username,
