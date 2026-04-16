@@ -130,7 +130,7 @@ export async function deleteCharge(formData: FormData) {
   revalidatePath(`/students/${studentId}`);
 }
 
-// --- 5. THE REAL PDF PARSER ---
+// --- 5. THE REAL PDF PARSER (ADVANCED ENGINE) ---
 export async function processPdfForStudent(formData: FormData) {
   const studentId = formData.get("studentId") as string;
   const file = formData.get("file") as File;
@@ -140,23 +140,16 @@ export async function processPdfForStudent(formData: FormData) {
   const arrayBuffer = await file.arrayBuffer();
 
   try {
-    // --- DYNAMIC LAZY LOAD ---
-    // 1. Add the missing pieces just in time
+    // --- LAZY LOAD PDF ENGINE ---
     if (typeof global.DOMMatrix === "undefined") {
       global.DOMMatrix = class DOMMatrix {} as any;
     }
-
-    // 2. Import the PDF reader ONLY right here, hiding it from Vercel's build robot
-    // @ts-ignore - Tell VS Code to ignore the missing types for the legacy build
-const pdfjs = await import('pdfjs-dist/legacy/build/pdf.js');
-
-    // 3. Load the PDF using the modern reader
+    // @ts-ignore
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.js');
     const loadingTask = pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) });
     const pdfDocument = await loadingTask.promise;
     
     let text = "";
-    
-    // Loop through the pages and grab the text
     for (let i = 1; i <= pdfDocument.numPages; i++) {
       const page = await pdfDocument.getPage(i);
       const textContent = await page.getTextContent();
@@ -164,27 +157,102 @@ const pdfjs = await import('pdfjs-dist/legacy/build/pdf.js');
       text += pageText + "\n";
     }
 
-    console.log("Modern PDF Text Extracted:", text);
+    // 1. PULL DATABASE SETTINGS FOR ACCURATE MATH
+    const classes = await prisma.classSetting.findMany();
+    const classMap = new Map(classes.map(c => [c.periodNum.toString(), c.durationMin]));
 
     const lines = text.split('\n');
-    let lateCount = 0;
-    let absentCount = 0;
-
-    lines.forEach(line => {
-      if (line.includes('#')) lateCount++;
-      if (line.includes('Π')) absentCount++;
-    });
-
-    if (lateCount > 0) {
-      await prisma.incident.create({
-        data: { studentId, date: new Date(), className: "Parsed PDF Lateness", type: "LATE", feeCalculated: lateCount * 1.00, notes: `Found ${lateCount} late marks (#) in report.` }
-      });
-    }
     
-    if (absentCount > 0) {
-      await prisma.incident.create({
-        data: { studentId, date: new Date(), className: "Parsed PDF Absence", type: "ABSENCE", feeCalculated: absentCount * 5.00, notes: `Found ${absentCount} absence marks (Π) in report.` }
-      });
+    // 2. PARSE TESTS (< 70% = $10)
+    for (const line of lines) {
+      if (line.includes("out of 100") || line.includes("%")) {
+        const gradeMatch = line.match(/(\d{1,3})%/);
+        if (gradeMatch) {
+          const grade = parseInt(gradeMatch[1]);
+          if (grade < 70) {
+            await prisma.incident.create({
+              data: { 
+                studentId, date: new Date(), className: "Test Score", 
+                type: "FAILED_TEST", feeCalculated: 10.00, 
+                notes: `Test score of ${grade}% (Below 70%)` 
+              }
+            });
+          }
+        }
+      }
+    }
+
+    // 3. PARSE ATTENDANCE & LATES
+    // Look for lines that start with a Day of the week (e.g., "Thu, 8/28/25")
+    const dateRegex = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s(\d{1,2}\/\d{1,2}\/\d{2})/;
+    
+    for (const line of lines) {
+      const dateMatch = line.match(dateRegex);
+      if (!dateMatch) continue;
+
+      const incidentDate = new Date(dateMatch[2]);
+      
+      // Clean up the line and split by commas (since the PDF parses as CSV)
+      const cells = line.split('","').map(c => c.replace(/"/g, '').trim());
+      
+      // Skip the first cell (the date itself)
+      for (let colIndex = 1; colIndex < cells.length; colIndex++) {
+        const cellValue = cells[colIndex];
+        if (!cellValue) continue;
+
+        // RULE: Ignore any mark with an 'e' (Excused)
+        if (cellValue.toLowerCase().includes('e') || cellValue.includes('De') || cellValue.includes('타')) {
+          continue; // $0 charge, completely skipped
+        }
+
+        // We assume column 16 corresponds to "22 Lights Out" based on standard reports
+        const isLightsOut = colIndex === 16; 
+        const durationMin = classMap.get(colIndex.toString()) || 60; // Default to 60m if not found
+
+        // RULE: ABSENCES (Π)
+        if (cellValue.includes('Π')) {
+          const fee = isLightsOut ? 10.00 : 5.00;
+          await prisma.incident.create({
+            data: { 
+              studentId, date: incidentDate, className: isLightsOut ? "Lights Out" : `Period ${colIndex}`, 
+              type: "ABSENCE", feeCalculated: fee, notes: isLightsOut ? "Unexcused Absence (Lights Out)" : "Unexcused Absence" 
+            }
+          });
+        } 
+        // RULE: LATES (Numbers representing minutes)
+        else {
+          const minutesLate = parseInt(cellValue);
+          if (!isNaN(minutesLate) && minutesLate > 0) {
+            
+            let fee = 0;
+            let note = "";
+
+            if (isLightsOut) {
+              // Lights out: $1 per 10 minutes
+              fee = Math.floor(minutesLate / 10) * 1.00;
+              note = `${minutesLate} mins late to Lights Out ($1 per 10m)`;
+            } else {
+              // Standard Class Lateness
+              if (minutesLate >= durationMin / 2) {
+                fee = 3.00;
+                note = `${minutesLate} mins late (Half class missed)`;
+              } else if (minutesLate >= 5) {
+                fee = 1.00;
+                note = `${minutesLate} mins late (Passed 5m threshold)`;
+              }
+            }
+
+            if (fee > 0) {
+              await prisma.incident.create({
+                data: { 
+                  studentId, date: incidentDate, className: isLightsOut ? "Lights Out" : `Period ${colIndex}`, 
+                  type: "LATE", feeCalculated: fee, notes: note 
+                }
+              });
+            }
+          }
+        }
+      }
     }
 
     revalidatePath(`/students/${studentId}`);
@@ -192,6 +260,6 @@ const pdfjs = await import('pdfjs-dist/legacy/build/pdf.js');
 
   } catch (error) {
     console.error("PDF Parsing Error:", error);
-    throw new Error("Failed to process the PDF. Ensure it is a valid text-based PDF.");
+    throw new Error("Failed to process the PDF.");
   }
 }
