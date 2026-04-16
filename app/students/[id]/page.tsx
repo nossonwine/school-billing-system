@@ -94,7 +94,12 @@ export default async function StudentProfilePage({ params }: { params: Promise<{
         <div className="lg:w-1/4 space-y-6 print:hidden">
           <div className="bg-blue-50 p-5 rounded-xl border border-blue-200">
             <h2 className="text-md font-bold mb-3 text-blue-900">Upload PDF Report</h2>
-            <form action={processPdfForStudent} className="flex flex-col gap-2">
+            <form action={async (formData) => {
+    "use server";
+    await processPdfForStudent(formData);
+  }} 
+  className="flex flex-col gap-2"
+>
               <input type="hidden" name="studentId" value={student.id} />
               <input type="file" name="file" accept="application/pdf" required className="w-full border bg-white p-2 rounded text-xs" />
               <button type="submit" className="bg-blue-600 text-white font-bold py-2 rounded text-sm hover:bg-blue-700">✨ Process with AI</button>
