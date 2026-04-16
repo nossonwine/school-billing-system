@@ -33,17 +33,10 @@ export async function deleteStudent(idOrFormData: string | FormData) {
   revalidatePath("/students");
 }
 
-// FIX: Updated to accept FormData so the bulk textarea works!
 export async function addMultipleStudents(formData: FormData) {
   const namesRaw = formData.get("names") as string;
   if (!namesRaw) return;
-
-  // Split names by line, clean up whitespace, and ignore empty lines
-  const namesArray = namesRaw
-    .split("\n")
-    .map(name => name.trim())
-    .filter(name => name !== "");
-
+  const namesArray = namesRaw.split("\n").map(name => name.trim()).filter(name => name !== "");
   const data = namesArray.map(name => ({ name }));
   await prisma.student.createMany({ data });
   revalidatePath("/students");
@@ -136,7 +129,7 @@ export async function deleteCharge(idOrFormData: string | FormData) {
   if (record) revalidatePath(`/students/${record.studentId}`);
 }
 
-// --- 4. THE AI-POWERED PDF PARSER ---
+// --- 4. THE EXHAUSTIVE AI PDF PARSER ---
 export async function processPdfForStudent(formData: FormData) {
   const studentId = formData.get("studentId") as string;
   const weekLabel = formData.get("weekLabel") as string;
@@ -155,32 +148,36 @@ export async function processPdfForStudent(formData: FormData) {
     for (let i = 1; i <= pdfDocument.numPages; i++) {
       const page = await pdfDocument.getPage(i);
       const textContent = await page.getTextContent();
-      text += textContent.items.map((item: any) => (item as any).str).join(" ") + "\n";
+      // Keep some structural spacing so the AI doesn't mix up columns
+      text += textContent.items.map((item: any) => (item as any).str).join(" | ") + "\n";
     }
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const aiResponse = await openai.chat.completions.create({
       model: "gpt-4o",
       response_format: { type: "json_object" },
+      max_tokens: 4096, // FIX: Gives the AI maximum output memory so it doesn't stop halfway
+      temperature: 0.1, // FIX: Makes the AI highly analytical and less likely to skip things
       messages: [
         {
           role: "system",
-          content: `You are a professional auditor for a school billing system. You are processing a progress report.
-          
+          content: `You are a brutal, exhaustive data-mining script. Your job is to extract EVERY SINGLE charge from a highly compressed school grid. 
+          WARNING: Do NOT summarize. Do NOT combine days. If there are 50 charges, you must output exactly 50 JSON objects. Scan every single character.
+
           MANDATORY CALCULATION RULES:
-          1. TESTS: Find every score with a %. If the score is BELOW 70 (e.g., 65%, 12%), charge exactly $10.00.
-          2. ABSENCES: The symbol 'Π' means absent. 
+          1. TESTS: Find EVERY score with a %. If the score is BELOW 70, charge exactly $10.00.
+          2. ABSENCES: Find EVERY symbol 'Π'. 
              - If it is '22 Lights Out', charge $10.00.
              - Any other class, charge $5.00.
-          3. LATES: Numbers (like 15, 20) are minutes late.
-             - If it is '22 Lights Out', charge $1.00 for every full 10 minutes (e.g., 20m = $2, 35m = $3).
+          3. LATES: Find EVERY number indicating minutes late.
+             - If it is '22 Lights Out', charge $1.00 for EVERY full 10 minutes (e.g., 20m = $2, 35m = $3).
              - Any other class: If >= 5 mins, charge $1.00.
           4. EXCUSED: If you see 'e', 'De', or '타', charge $0.00.
-          
-          You must scan the ENTIRE text. Do not skip any dates or symbols.
-          Return ONLY this JSON format: {"incidents": [{"date": "YYYY-MM-DD", "className": "string", "type": "TEST"|"ABSENCE"|"LATE", "fee": number, "notes": "Brief reason"}]}`
+
+          Return ONLY this JSON format. Treat every found symbol as a separate incident:
+          {"incidents": [{"date": "YYYY-MM-DD", "className": "string", "type": "TEST"|"ABSENCE"|"LATE", "fee": number, "notes": "Brief reason"}]}`
         },
-        { role: "user", content: `Process all charges from this report:\n\n${text}` }
+        { role: "user", content: `Process ALL charges exhaustively from this report:\n\n${text}` }
       ]
     });
 
