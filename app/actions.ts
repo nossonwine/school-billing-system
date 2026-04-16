@@ -27,15 +27,24 @@ export async function addStudent(formData: FormData) {
   revalidatePath("/students");
 }
 
-// FIX: Now accepts either a String ID or FormData
 export async function deleteStudent(idOrFormData: string | FormData) {
   const id = typeof idOrFormData === "string" ? idOrFormData : idOrFormData.get("id") as string;
   await prisma.student.delete({ where: { id } });
   revalidatePath("/students");
 }
 
-export async function addMultipleStudents(studentNames: string[]) {
-  const data = studentNames.map(name => ({ name }));
+// FIX: Updated to accept FormData so the bulk textarea works!
+export async function addMultipleStudents(formData: FormData) {
+  const namesRaw = formData.get("names") as string;
+  if (!namesRaw) return;
+
+  // Split names by line, clean up whitespace, and ignore empty lines
+  const namesArray = namesRaw
+    .split("\n")
+    .map(name => name.trim())
+    .filter(name => name !== "");
+
+  const data = namesArray.map(name => ({ name }));
   await prisma.student.createMany({ data });
   revalidatePath("/students");
 }
@@ -66,7 +75,6 @@ export async function saveClass(formData: FormData) {
   revalidatePath("/settings");
 }
 
-// FIX: Now accepts either a String ID or FormData
 export async function deleteClass(idOrFormData: string | FormData) {
   const id = typeof idOrFormData === "string" ? idOrFormData : idOrFormData.get("id") as string;
   await prisma.classSetting.delete({ where: { id } });
@@ -121,7 +129,6 @@ export async function updateChargePayment(formData: FormData) {
   revalidatePath(`/students/${studentId}`);
 }
 
-// FIX: Now accepts either a String ID or FormData
 export async function deleteCharge(idOrFormData: string | FormData) {
   const id = typeof idOrFormData === "string" ? idOrFormData : idOrFormData.get("id") as string;
   const record = await prisma.incident.findUnique({ where: { id }, select: { studentId: true } });
@@ -160,12 +167,10 @@ export async function processPdfForStudent(formData: FormData) {
           role: "system",
           content: `You are a strict school billing engine.
           RULES:
-          1. TESTS (%): If score < 70%, charge exactly $10.00. (FAILED_TEST)
+          1. TESTS (%): If score < 70%, charge exactly $10.00.
           2. EXCUSED: 'e', 'De', or '타' = $0.
-          3. ABSENCES (Π): Standard = $5.00. Period 22 (Lights Out) = $10.00.
-          4. LATES: Standard: > 5m = $1.00. > half class = $3.00. 
-             Period 22 (Lights Out): Charge $1.00 for EVERY full 10 minutes (e.g. 20m = $2).
-          
+          3. ABSENCES (Π): Std = $5.00, Period 22 = $10.00.
+          4. LATES: Std > 5m = $1.00. Period 22: $1 per 10m.
           Return JSON: {"incidents": [{"date": "YYYY-MM-DD", "className": "string", "type": "TEST"|"ABSENCE"|"LATE", "fee": number, "notes": "string"}]}`
         },
         { role: "user", content: `Text: ${text}` }
@@ -173,7 +178,6 @@ export async function processPdfForStudent(formData: FormData) {
     });
 
     const parsed = JSON.parse(aiResponse.choices[0].message.content || '{"incidents": []}');
-
     for (const item of parsed.incidents) {
       if (item.fee > 0) {
         await prisma.incident.create({
@@ -188,7 +192,6 @@ export async function processPdfForStudent(formData: FormData) {
         });
       }
     }
-
     revalidatePath(`/students/${studentId}`);
     return { success: true, studentId };
   } catch (e) {
