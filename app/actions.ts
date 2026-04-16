@@ -165,15 +165,22 @@ export async function processPdfForStudent(formData: FormData) {
       messages: [
         {
           role: "system",
-          content: `You are a strict school billing engine.
-          RULES:
-          1. TESTS (%): If score < 70%, charge exactly $10.00.
-          2. EXCUSED: 'e', 'De', or '타' = $0.
-          3. ABSENCES (Π): Std = $5.00, Period 22 = $10.00.
-          4. LATES: Std > 5m = $1.00. Period 22: $1 per 10m.
-          Return JSON: {"incidents": [{"date": "YYYY-MM-DD", "className": "string", "type": "TEST"|"ABSENCE"|"LATE", "fee": number, "notes": "string"}]}`
+          content: `You are a professional auditor for a school billing system. You are processing a progress report.
+          
+          MANDATORY CALCULATION RULES:
+          1. TESTS: Find every score with a %. If the score is BELOW 70 (e.g., 65%, 12%), charge exactly $10.00.
+          2. ABSENCES: The symbol 'Π' means absent. 
+             - If it is '22 Lights Out', charge $10.00.
+             - Any other class, charge $5.00.
+          3. LATES: Numbers (like 15, 20) are minutes late.
+             - If it is '22 Lights Out', charge $1.00 for every full 10 minutes (e.g., 20m = $2, 35m = $3).
+             - Any other class: If >= 5 mins, charge $1.00.
+          4. EXCUSED: If you see 'e', 'De', or '타', charge $0.00.
+          
+          You must scan the ENTIRE text. Do not skip any dates or symbols.
+          Return ONLY this JSON format: {"incidents": [{"date": "YYYY-MM-DD", "className": "string", "type": "TEST"|"ABSENCE"|"LATE", "fee": number, "notes": "Brief reason"}]}`
         },
-        { role: "user", content: `Text: ${text}` }
+        { role: "user", content: `Process all charges from this report:\n\n${text}` }
       ]
     });
 
