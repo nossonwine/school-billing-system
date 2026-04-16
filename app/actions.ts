@@ -27,8 +27,9 @@ export async function addStudent(formData: FormData) {
   revalidatePath("/students");
 }
 
-export async function deleteStudent(formData: FormData) {
-  const id = formData.get("id") as string;
+// FIX: Now accepts either a String ID or FormData
+export async function deleteStudent(idOrFormData: string | FormData) {
+  const id = typeof idOrFormData === "string" ? idOrFormData : idOrFormData.get("id") as string;
   await prisma.student.delete({ where: { id } });
   revalidatePath("/students");
 }
@@ -65,14 +66,14 @@ export async function saveClass(formData: FormData) {
   revalidatePath("/settings");
 }
 
-export async function deleteClass(formData: FormData) {
-  const id = formData.get("id") as string;
+// FIX: Now accepts either a String ID or FormData
+export async function deleteClass(idOrFormData: string | FormData) {
+  const id = typeof idOrFormData === "string" ? idOrFormData : idOrFormData.get("id") as string;
   await prisma.classSetting.delete({ where: { id } });
   revalidatePath("/settings");
 }
 
 export async function getGlobalSettings() {
-  // FIX: Changed plural 'globalSettings' to singular 'globalSetting'
   let settings = await prisma.globalSetting.findFirst();
   if (!settings) {
     settings = await prisma.globalSetting.create({ data: { absenceFee: 5, testFailFee: 10 } });
@@ -85,7 +86,6 @@ export async function saveGlobalSettings(formData: FormData) {
   const absenceFee = parseFloat(formData.get("absenceFee") as string);
   const testFailFee = parseFloat(formData.get("testFailFee") as string);
 
-  // FIX: Changed plural 'globalSettings' to singular 'globalSetting'
   await prisma.globalSetting.update({
     where: { id },
     data: { absenceFee, testFailFee }
@@ -121,11 +121,12 @@ export async function updateChargePayment(formData: FormData) {
   revalidatePath(`/students/${studentId}`);
 }
 
-export async function deleteCharge(formData: FormData) {
-  const id = formData.get("id") as string;
-  const studentId = formData.get("studentId") as string;
+// FIX: Now accepts either a String ID or FormData
+export async function deleteCharge(idOrFormData: string | FormData) {
+  const id = typeof idOrFormData === "string" ? idOrFormData : idOrFormData.get("id") as string;
+  const record = await prisma.incident.findUnique({ where: { id }, select: { studentId: true } });
   await prisma.incident.delete({ where: { id } });
-  revalidatePath(`/students/${studentId}`);
+  if (record) revalidatePath(`/students/${record.studentId}`);
 }
 
 // --- 4. THE AI-POWERED PDF PARSER ---
@@ -138,7 +139,6 @@ export async function processPdfForStudent(formData: FormData) {
 
   try {
     const arrayBuffer = await file.arrayBuffer();
-    if (typeof global.DOMMatrix === "undefined") { global.DOMMatrix = class DOMMatrix {} as any; }
     // @ts-ignore
     const pdfjs = await import('pdfjs-dist/legacy/build/pdf.js');
     const loadingTask = pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) });
@@ -148,7 +148,7 @@ export async function processPdfForStudent(formData: FormData) {
     for (let i = 1; i <= pdfDocument.numPages; i++) {
       const page = await pdfDocument.getPage(i);
       const textContent = await page.getTextContent();
-      text += textContent.items.map((item: any) => item.str).join(" ") + "\n";
+      text += textContent.items.map((item: any) => (item as any).str).join(" ") + "\n";
     }
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -158,18 +158,21 @@ export async function processPdfForStudent(formData: FormData) {
       messages: [
         {
           role: "system",
-          content: `You are a billing accountant. Rules:
-          - Test % < 70 = $10.00.
-          - Absence (Π): Std = $5, Period 22 = $10.
-          - Late (Numbers): Std > 5m = $1. Period 22 = $1 per 10m.
-          - Excused (e, De, 타) = $0 fee.
+          content: `You are a strict school billing engine.
+          RULES:
+          1. TESTS (%): If score < 70%, charge exactly $10.00. (FAILED_TEST)
+          2. EXCUSED: 'e', 'De', or '타' = $0.
+          3. ABSENCES (Π): Standard = $5.00. Period 22 (Lights Out) = $10.00.
+          4. LATES: Standard: > 5m = $1.00. > half class = $3.00. 
+             Period 22 (Lights Out): Charge $1.00 for EVERY full 10 minutes (e.g. 20m = $2).
+          
           Return JSON: {"incidents": [{"date": "YYYY-MM-DD", "className": "string", "type": "TEST"|"ABSENCE"|"LATE", "fee": number, "notes": "string"}]}`
         },
-        { role: "user", content: `Process: ${text}` }
+        { role: "user", content: `Text: ${text}` }
       ]
     });
 
-    const parsed = JSON.parse(aiResponse.choices[0].message.content || '{"incidents":[]}');
+    const parsed = JSON.parse(aiResponse.choices[0].message.content || '{"incidents": []}');
 
     for (const item of parsed.incidents) {
       if (item.fee > 0) {
