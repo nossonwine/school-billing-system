@@ -2,14 +2,12 @@
 
 import { signIn } from "next-auth/react";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,22 +26,6 @@ export default function Login() {
     } else {
       // FORCES a hard browser reload so the security cookie is immediately recognized
       window.location.href = "/";
-    }
-  };
-    // This securely sends the credentials to the NextAuth checkpoint we built earlier
-    const res = await signIn("credentials", {
-      username,
-      password,
-      redirect: false,
-    });
-
-    if (res?.error) {
-      setError("Invalid login. Please check your credentials.");
-      setLoading(false);
-    } else {
-      // The Bouncer in middleware.ts will automatically route admins to /students and parents to /portal
-      router.push("/");
-      router.refresh();
     }
   };
 
