@@ -2,6 +2,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import OpenAI from "openai";
 
 const prisma = new PrismaClient();
 
@@ -130,7 +131,7 @@ export async function deleteCharge(formData: FormData) {
   revalidatePath(`/students/${studentId}`);
 }
 
-// --- 5. THE REAL PDF PARSER (ADVANCED ENGINE) ---
+// --- 5. THE AI-POWERED PDF PARSER ---
 export async function processPdfForStudent(formData: FormData) {
   const studentId = formData.get("studentId") as string;
   const file = formData.get("file") as File;
@@ -140,7 +141,7 @@ export async function processPdfForStudent(formData: FormData) {
   const arrayBuffer = await file.arrayBuffer();
 
   try {
-    // --- LAZY LOAD PDF ENGINE ---
+    // 1. EXTRACT RAW TEXT FROM PDF
     if (typeof global.DOMMatrix === "undefined") {
       global.DOMMatrix = class DOMMatrix {} as any;
     }
@@ -157,119 +158,67 @@ export async function processPdfForStudent(formData: FormData) {
       text += pageText + "\n";
     }
 
-    // 1. PULL DATABASE SETTINGS FOR ACCURATE MATH
+    // 2. GET DB SETTINGS TO FEED TO THE AI
     const classes = await prisma.classSetting.findMany();
-    // Create a map to quickly look up a class name and duration by its period number
-    const classMap = new Map(classes.map(c => [c.periodNum.toString(), { name: c.hebrewName, duration: c.durationMin }]));
+    const classRules = classes.map(c => `Period ${c.periodNum} (${c.hebrewName}): ${c.durationMin} minutes`).join(", ");
 
-    const lines = text.split('\n');
-    let currentDate = new Date(); // Fallback date
+    // 3. SEND TO OPENAI FOR INTELLIGENT PROCESSING
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     
-    // 2. PARSE TESTS (< 70% = $10)
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      // Try to catch the date right above the score in the raw text
-      const dateMatch = line.match(/(Sun|Mon|Tue|Wed|Thu|Fri|Sat),\s(\d{1,2}\/\d{1,2}\/\d{2})/);
-      if (dateMatch) {
-        currentDate = new Date(dateMatch[2]);
-      }
-
-      if (line.includes("out of 100") || line.includes("%")) {
-        const gradeMatch = line.match(/(\d{1,3})%/);
-        if (gradeMatch) {
-          const grade = parseInt(gradeMatch[1]);
-          if (grade < 70) {
-            await prisma.incident.create({
-              data: { 
-                studentId, date: currentDate, className: "בחינות (Test)", 
-                type: "FAILED_TEST", feeCalculated: 10.00, 
-                notes: `Test score of ${grade}% (Below 70%)` 
+    const aiResponse = await openai.chat.completions.create({
+      model: "gpt-4o",
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: `You are a strict school billing accountant. You extract attendance and test data from messy PDF text and return a JSON object with an array named "incidents".
+          
+          RULES FOR PARSING:
+          1. TESTS: Look for grades with '%'. If the grade is strictly LESS THAN 70%, charge a flat $10.00 fee. (Type: "FAILED_TEST").
+          2. EXCUSED: Any attendance mark containing 'e', 'De', or '타' is EXCUSED. Ignore it completely. DO NOT add it to the JSON.
+          3. ABSENCES: The symbol 'Π' means absent. Charge $5.00. EXCEPTION: If the class is "22 Lights Out", charge $10.00. (Type: "ABSENCE").
+          4. LATES: Numbers indicate minutes late. 
+             - If the class is "22 Lights Out": Charge $1.00 for every full 10 minutes late (e.g., 20m = $2).
+             - If standard class: Check the class duration. If late >= half the duration, charge $3.00. If late >= 5 minutes (but less than half), charge $1.00. If late < 5 minutes, DO NOT charge. (Type: "LATE").
+          
+          CLASS DURATIONS: ${classRules}. Assume "22 Lights Out" is 100 minutes.
+          
+          OUTPUT FORMAT MUST BE VALID JSON:
+          {
+            "incidents": [
+              {
+                "date": "YYYY-MM-DD",
+                "className": "string (Period # or Test)",
+                "type": "FAILED_TEST" | "ABSENCE" | "LATE",
+                "fee": number,
+                "notes": "string (Explain the calculation briefly)"
               }
-            });
+            ]
+          }`
+        },
+        {
+          role: "user",
+          content: `Analyze this raw PDF text and extract the billable incidents:\n\n${text}`
+        }
+      ]
+    });
+
+    const parsedData = JSON.parse(aiResponse.choices[0].message.content || '{"incidents": []}');
+    const incidents = parsedData.incidents;
+
+    // 4. SAVE EXTRACTED DATA TO DATABASE
+    for (const incident of incidents) {
+      if (incident.fee > 0) {
+        await prisma.incident.create({
+          data: {
+            studentId,
+            date: new Date(incident.date),
+            className: incident.className,
+            type: incident.type,
+            feeCalculated: incident.fee,
+            notes: incident.notes
           }
-        }
-      }
-    }
-
-    // 3. PARSE THE GRID (PAGE 3)
-    const gridDateRegex = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s(\d{1,2}\/\d{1,2}\/\d{2})/;
-    
-    // Hardcoding the column mapping based on your PDF header logic (0, 1, 6, 2, 7, 8, 9, 10, 12, 14, 13, 15, 16, 20, 21, 22, 23)
-    // This connects the cell index to the Period Number
-    const columnToPeriodMap = ["0", "1", "6", "2", "7", "8", "9", "10", "12", "14", "13", "15", "16", "20", "21", "22", "23"];
-
-    for (const line of lines) {
-      const dateMatch = line.match(gridDateRegex);
-      if (!dateMatch) continue;
-
-      const incidentDate = new Date(dateMatch[2]);
-      
-      // Clean up the line and split by commas
-      const cells = line.split('","').map(c => c.replace(/"/g, '').trim());
-      
-      // Skip the first cell (the date itself)
-      for (let colIndex = 1; colIndex < cells.length; colIndex++) {
-        const cellValue = cells[colIndex];
-        if (!cellValue) continue;
-
-        // RULE: Ignore any mark with an 'e' (Excused)
-        if (cellValue.toLowerCase().includes('e') || cellValue.includes('De') || cellValue.includes('타')) {
-          continue; // $0 charge, completely skipped
-        }
-
-        const periodNum = columnToPeriodMap[colIndex - 1] || "Unknown";
-        const classData = classMap.get(periodNum) || { name: `Period ${periodNum}`, duration: 60 };
-        const isLightsOut = periodNum === "22";
-
-        // RULE: ABSENCES (Π)
-        if (cellValue.includes('Π')) {
-          const fee = isLightsOut ? 10.00 : 5.00;
-          await prisma.incident.create({
-            data: { 
-              studentId, date: incidentDate, className: classData.name, 
-              type: "ABSENCE", feeCalculated: fee, notes: isLightsOut ? "Unexcused Absence (Lights Out)" : "Unexcused Absence" 
-            }
-          });
-        } 
-        // RULE: LATES / LEFT EARLY (Numbers representing minutes)
-        else {
-          const minutesMatch = cellValue.match(/\d+/);
-          if (minutesMatch) {
-            const minutes = parseInt(minutesMatch[0]);
-            if (minutes > 0) {
-              let fee = 0;
-              let note = "";
-
-              if (isLightsOut) {
-                // Lights out: $1 per 10 minutes
-                fee = Math.floor(minutes / 10) * 1.00;
-                note = `${minutes} mins late ($1 per 10m)`;
-              } else {
-                // Standard Class Lateness
-                if (minutes >= classData.duration / 2) {
-                  fee = 3.00;
-                  note = `${minutes} mins late (Half class missed)`;
-                } else if (minutes >= 5) {
-                  fee = 1.00;
-                  note = `${minutes} mins late (Passed 5m threshold)`;
-                } else {
-                   // Under 5 minutes late or left early without penalty trigger
-                   fee = 0.00;
-                   note = `${minutes} mins missed (No fee applied)`;
-                }
-              }
-
-              if (fee > 0 || note.includes("No fee applied")) {
-                await prisma.incident.create({
-                  data: { 
-                    studentId, date: incidentDate, className: classData.name, 
-                    type: "LATE/MISSED", feeCalculated: fee, notes: note 
-                  }
-                });
-              }
-            }
-          }
-        }
+        });
       }
     }
 
@@ -278,6 +227,6 @@ export async function processPdfForStudent(formData: FormData) {
 
   } catch (error) {
     console.error("PDF Parsing Error:", error);
-    throw new Error("Failed to process the PDF.");
+    throw new Error("Failed to process the PDF via AI.");
   }
 }
