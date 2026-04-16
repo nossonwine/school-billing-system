@@ -2,11 +2,15 @@
 
 import { PrismaClient } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import * as pdfjs from 'pdfjs-dist';
 
-// --- MAGIC FIX FOR PDF SERVER PARSING ---
+// --- MAGIC FIX FOR SERVER PARSING ---
 if (typeof global.DOMMatrix === "undefined") {
   global.DOMMatrix = class DOMMatrix {} as any;
 }
+
+// Point to the modern web-worker so Vercel doesn't have to build it
+pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
 // ----------------------------------------
 
 const prisma = new PrismaClient();
@@ -144,47 +148,50 @@ export async function processPdfForStudent(formData: FormData) {
   if (!file || !studentId) return { error: "Missing file or student" };
 
   const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
 
-  // IMPENETRABLE UNWRAPPER: Safely extract the function from Turbopack's grip
-  const rawPdfModule = require('pdf-parse');
-  let pdf;
-  
-  if (typeof rawPdfModule === 'function') {
-    pdf = rawPdfModule;
-  } else if (rawPdfModule && typeof rawPdfModule.default === 'function') {
-    pdf = rawPdfModule.default;
-  } else if (rawPdfModule && typeof rawPdfModule.pdfParse === 'function') {
-    pdf = rawPdfModule.pdfParse;
-  } else {
-    throw new Error("Turbopack completely mangled pdf-parse. Cannot find function.");
-  }
+  try {
+    // Load the PDF using the modern reader
+    const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
+    const pdfDocument = await loadingTask.promise;
+    
+    let text = "";
+    
+    // Loop through the pages and grab the text
+    for (let i = 1; i <= pdfDocument.numPages; i++) {
+      const page = await pdfDocument.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map((item: any) => item.str).join(" ");
+      text += pageText + "\n";
+    }
 
-  const data = await pdf(buffer);
-  const text = data.text as string;
+    console.log("Modern PDF Text Extracted:", text);
 
-  const lines = text.split('\n');
-  let lateCount = 0;
-  let absentCount = 0;
+    const lines = text.split('\n');
+    let lateCount = 0;
+    let absentCount = 0;
 
-  lines.forEach(line => {
-    if (line.includes('#')) lateCount++;
-    if (line.includes('Π')) absentCount++;
-  });
-
-  if (lateCount > 0) {
-    await prisma.incident.create({
-      data: { studentId, date: new Date(), className: "Parsed PDF Lateness", type: "LATE", feeCalculated: lateCount * 1.00, notes: `Found ${lateCount} late marks (#) in report.` }
+    lines.forEach(line => {
+      if (line.includes('#')) lateCount++;
+      if (line.includes('Π')) absentCount++;
     });
-  }
-  
-  if (absentCount > 0) {
-    await prisma.incident.create({
-      data: { studentId, date: new Date(), className: "Parsed PDF Absence", type: "ABSENCE", feeCalculated: absentCount * 5.00, notes: `Found ${absentCount} absence marks (Π) in report.` }
-    });
-  }
 
-  revalidatePath(`/students/${studentId}`);
-  
-  return { success: true, studentId };
+    if (lateCount > 0) {
+      await prisma.incident.create({
+        data: { studentId, date: new Date(), className: "Parsed PDF Lateness", type: "LATE", feeCalculated: lateCount * 1.00, notes: `Found ${lateCount} late marks (#) in report.` }
+      });
+    }
+    
+    if (absentCount > 0) {
+      await prisma.incident.create({
+        data: { studentId, date: new Date(), className: "Parsed PDF Absence", type: "ABSENCE", feeCalculated: absentCount * 5.00, notes: `Found ${absentCount} absence marks (Π) in report.` }
+      });
+    }
+
+    revalidatePath(`/students/${studentId}`);
+    return { success: true, studentId };
+
+  } catch (error) {
+    console.error("PDF Parsing Error:", error);
+    throw new Error("Failed to process the PDF. Ensure it is a valid text-based PDF.");
+  }
 }
