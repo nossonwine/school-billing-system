@@ -1,4 +1,12 @@
-import { getStudentProfile, getClasses, saveStudentExemptions, addManualCharge, updateChargePayment, deleteCharge } from "../../actions";
+import { 
+  getStudentProfile, 
+  getClasses, 
+  saveStudentExemptions, 
+  addManualCharge, 
+  updateChargePayment, 
+  deleteCharge,
+  processPdfForStudent // <-- Added the AI PDF parser import here
+} from "../../actions";
 import Link from "next/link";
 
 // FIX: Next.js 16 requires 'params' to be a Promise!
@@ -35,9 +43,28 @@ export default async function StudentProfilePage({ params }: { params: Promise<{
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
-        {/* LEFT COLUMN: SETTINGS & ADD CHARGES */}
+        {/* LEFT COLUMN: UPLOAD, SETTINGS & ADD CHARGES */}
         <div className="space-y-6">
           
+          {/* --- NEW AI PDF UPLOAD SECTION --- */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-blue-200 ring-1 ring-blue-50">
+            <h2 className="text-lg font-bold mb-3 border-b pb-2 text-blue-900">Upload Progress Report</h2>
+            <form action={processPdfForStudent} className="flex flex-col gap-3">
+              <input type="hidden" name="studentId" value={student.id} />
+              <input 
+                type="file" 
+                name="file" 
+                accept="application/pdf" 
+                required
+                className="w-full border border-gray-300 p-2 rounded outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 bg-gray-50"
+              />
+              <button type="submit" className="bg-blue-600 text-white font-bold py-2.5 rounded hover:bg-blue-700 transition shadow-sm">
+                ✨ Process PDF with AI
+              </button>
+            </form>
+            <p className="text-xs text-gray-500 mt-2 text-center">Automatically scans tests, absences, and Lights Out late fees.</p>
+          </div>
+
           {/* Exemptions Form */}
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
             <h2 className="text-lg font-bold mb-3 border-b pb-2">Student Exemptions & Deals</h2>
@@ -93,7 +120,7 @@ export default async function StudentProfilePage({ params }: { params: Promise<{
         <div className="md:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-200">
           <div className="flex justify-between items-center mb-4 border-b pb-2">
             <h2 className="text-xl font-bold text-gray-900">Billing Ledger</h2>
-            <button className="bg-green-600 text-white text-sm font-bold py-1.5 px-4 rounded hover:bg-green-700">
+            <button className="bg-green-600 text-white text-sm font-bold py-1.5 px-4 rounded hover:bg-green-700 shadow-sm">
               🖨️ Export to PDF
             </button>
           </div>

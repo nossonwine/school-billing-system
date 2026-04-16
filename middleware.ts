@@ -33,10 +33,10 @@ export async function middleware(request: NextRequest) {
 
   // 4. HOMEPAGE TRAFFIC COP
   if (path === "/") {
-    if (token.role === "ADMIN") return NextResponse.redirect(new URL('/students', request.url));
+    // Only kick Parents to the portal. Admins are allowed to stay on the Dashboard (/)!
     if (token.role === "PARENT") return NextResponse.redirect(new URL('/portal', request.url));
   }
-
+  
   return NextResponse.next();
 }
 
