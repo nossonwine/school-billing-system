@@ -9,7 +9,7 @@ export default async function ParentDashboard() {
     orderBy: { date: 'desc' }
   });
 
-  const totalBalance = incidents.reduce((sum, item) => sum + (item.feeCalculated - item.amountPaid), 0);
+  const totalBalance = incidents.reduce((sum, item) => sum + ((item.feeCalculated || 0) - item.amountPaid), 0);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
