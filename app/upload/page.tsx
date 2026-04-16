@@ -18,7 +18,7 @@ export default function UploadPage() {
         setStudents(data);
         if (data.length > 0) setSelectedStudent(data[0].id);
       })
-      .catch(err => console.log("Failed to fetch students"));
+      .catch(error => console.log("Failed to fetch students"));
   }, []);
 
   const handleUpload = async (formData: FormData) => {

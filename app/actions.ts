@@ -42,7 +42,7 @@ export async function saveGlobalSettings(formData: FormData) {
   const lateTier1Fee = parseFloat(formData.get("lateTier1Fee") as string);
   const testFailFee = parseFloat(formData.get("testFailFee") as string);
 
-  let settings = await prisma.globalSetting.findFirst();
+ const settings = await prisma.globalSetting.findFirst();
   if (settings) {
     await prisma.globalSetting.update({
       where: { id: settings.id },
@@ -147,11 +147,11 @@ export async function processPdfForStudent(formData: FormData) {
     }
 
     // 2. Import the PDF reader ONLY right here, hiding it from Vercel's build robot
-    const pdfjs = await import('pdfjs-dist');
-    pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+    // Use the legacy Node.js build so it doesn't look for a web browser worker!
+const pdfjs = await import('pdfjs-dist/legacy/build/pdf.js');
 
     // 3. Load the PDF using the modern reader
-    const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
+    const loadingTask = pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) });
     const pdfDocument = await loadingTask.promise;
     
     let text = "";
