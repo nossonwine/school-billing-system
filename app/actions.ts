@@ -6,6 +6,14 @@ import OpenAI from "openai";
 
 const prisma = new PrismaClient();
 
+// --- 1. STUDENT MANAGEMENT ---
+export async function getStudents() {
+  return await prisma.student.findMany({
+    include: { incidents: true },
+    orderBy: { name: 'asc' }
+  });
+}
+
 export async function getStudentProfile(id: string) {
   return await prisma.student.findUnique({
     where: { id },
@@ -13,8 +21,22 @@ export async function getStudentProfile(id: string) {
   });
 }
 
-export async function getClasses() {
-  return await prisma.classSetting.findMany({ orderBy: { periodNum: 'asc' } });
+export async function addStudent(formData: FormData) {
+  const name = formData.get("name") as string;
+  await prisma.student.create({ data: { name } });
+  revalidatePath("/students");
+}
+
+export async function deleteStudent(formData: FormData) {
+  const id = formData.get("id") as string;
+  await prisma.student.delete({ where: { id } });
+  revalidatePath("/students");
+}
+
+export async function addMultipleStudents(studentNames: string[]) {
+  const data = studentNames.map(name => ({ name }));
+  await prisma.student.createMany({ data });
+  revalidatePath("/students");
 }
 
 export async function saveStudentExemptions(formData: FormData) {
@@ -24,6 +46,52 @@ export async function saveStudentExemptions(formData: FormData) {
   revalidatePath(`/students/${id}`);
 }
 
+// --- 2. SETTINGS & CLASS MANAGEMENT ---
+export async function getClasses() {
+  return await prisma.classSetting.findMany({ orderBy: { periodNum: 'asc' } });
+}
+
+export async function saveClass(formData: FormData) {
+  const id = formData.get("id") as string;
+  const periodNum = parseInt(formData.get("periodNum") as string);
+  const hebrewName = formData.get("hebrewName") as string;
+  const durationMin = parseInt(formData.get("durationMin") as string);
+
+  if (id) {
+    await prisma.classSetting.update({ where: { id }, data: { periodNum, hebrewName, durationMin } });
+  } else {
+    await prisma.classSetting.create({ data: { periodNum, hebrewName, durationMin } });
+  }
+  revalidatePath("/settings");
+}
+
+export async function deleteClass(formData: FormData) {
+  const id = formData.get("id") as string;
+  await prisma.classSetting.delete({ where: { id } });
+  revalidatePath("/settings");
+}
+
+export async function getGlobalSettings() {
+  let settings = await prisma.globalSettings.findFirst();
+  if (!settings) {
+    settings = await prisma.globalSettings.create({ data: { absenceFee: 5, testFailFee: 10 } });
+  }
+  return settings;
+}
+
+export async function saveGlobalSettings(formData: FormData) {
+  const id = formData.get("id") as string;
+  const absenceFee = parseFloat(formData.get("absenceFee") as string);
+  const testFailFee = parseFloat(formData.get("testFailFee") as string);
+
+  await prisma.globalSettings.update({
+    where: { id },
+    data: { absenceFee, testFailFee }
+  });
+  revalidatePath("/settings");
+}
+
+// --- 3. CHARGE & LEDGER ACTIONS ---
 export async function addManualCharge(formData: FormData) {
   const studentId = formData.get("studentId") as string;
   const date = new Date(formData.get("date") as string);
@@ -58,12 +126,13 @@ export async function deleteCharge(formData: FormData) {
   revalidatePath(`/students/${studentId}`);
 }
 
+// --- 4. THE AI-POWERED PDF PARSER ---
 export async function processPdfForStudent(formData: FormData) {
   const studentId = formData.get("studentId") as string;
   const weekLabel = formData.get("weekLabel") as string;
   const file = formData.get("file") as File;
   
-  if (!file || !studentId) return { error: "Missing data" };
+  if (!file || !studentId) return { error: "Missing file or student" };
 
   try {
     const arrayBuffer = await file.arrayBuffer();
@@ -87,11 +156,11 @@ export async function processPdfForStudent(formData: FormData) {
       messages: [
         {
           role: "system",
-          content: `You are a billing engine. RULES: 
-          1. TEST < 70% = $10 fee. 
-          2. ABSENCE (Π): Standard = $5, Period 22 (Lights Out) = $10. 
-          3. LATE: Standard > 5m = $1. Period 22: $1 per 10m.
-          4. EXCUSED (e, De, 타) = $0 fee.
+          content: `You are a billing accountant. Rules:
+          - Test % < 70 = $10.00.
+          - Absence (Π): Std = $5, Period 22 = $10.
+          - Late (Numbers): Std > 5m = $1. Period 22 = $1 per 10m.
+          - Excused (e, De, 타) = $0 fee.
           Return JSON: {"incidents": [{"date": "YYYY-MM-DD", "className": "string", "type": "TEST"|"ABSENCE"|"LATE", "fee": number, "notes": "string"}]}`
         },
         { role: "user", content: `Process: ${text}` }
@@ -118,6 +187,7 @@ export async function processPdfForStudent(formData: FormData) {
     revalidatePath(`/students/${studentId}`);
     return { success: true, studentId };
   } catch (e) {
-    return { error: "Failed" };
+    console.error(e);
+    return { error: "Failed to process PDF" };
   }
 }
