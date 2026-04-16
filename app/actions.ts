@@ -147,7 +147,7 @@ export async function processPdfForStudent(formData: FormData) {
     }
 
     // 2. Import the PDF reader ONLY right here, hiding it from Vercel's build robot
-    // Use the legacy Node.js build so it doesn't look for a web browser worker!
+    // @ts-ignore - Tell VS Code to ignore the missing types for the legacy build
 const pdfjs = await import('pdfjs-dist/legacy/build/pdf.js');
 
     // 3. Load the PDF using the modern reader
