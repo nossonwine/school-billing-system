@@ -1,52 +1,82 @@
-import { PrismaClient } from "@prisma/client";
+"use client";
 
-const prisma = new PrismaClient();
+import { signIn } from "next-auth/react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 
-export default async function ParentDashboard() {
-  // In a real session, we'd use the logged-in ID. For now, we fetch all incidents.
-  const incidents = await prisma.incident.findMany({
-    include: { student: true },
-    orderBy: { date: 'desc' }
-  });
+export default function Login() {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
-  const totalBalance = incidents.reduce((sum, item) => sum + ((item.feeCalculated || 0) - item.amountPaid), 0);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    // This securely sends the credentials to the NextAuth checkpoint we built earlier
+    const res = await signIn("credentials", {
+      username,
+      password,
+      redirect: false,
+    });
+
+    if (res?.error) {
+      setError("Invalid login. Please check your credentials.");
+      setLoading(false);
+    } else {
+      // The Bouncer in middleware.ts will automatically route admins to /students and parents to /portal
+      router.push("/");
+      router.refresh();
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
-      <div className="max-w-5xl mx-auto space-y-6">
-        <div className="bg-blue-600 rounded-xl p-8 text-white shadow-lg flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold">Student Summary</h1>
-            <p className="mt-2 opacity-90">Real-time billing from parsed reports.</p>
+    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+      <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
+        <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">School Billing Portal</h1>
+        
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+            {error}
           </div>
-          <div className="text-right">
-            <p className="text-sm opacity-90 uppercase tracking-wide">Outstanding Balance</p>
-            <p className="text-5xl font-extrabold">${totalBalance.toFixed(2)}</p>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <label className="block text-gray-700 font-medium mb-2">Username or Email</label>
+            <input
+              type="text"
+              className="w-full border border-gray-300 p-3 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Admin email or Student Name"
+              required
+            />
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <section className="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200">
-            <h3 className="font-bold text-red-600 mb-4 border-b pb-2">Tests (&lt; 70%)</h3>
-            {incidents.filter(i => i.type === "TEST").map(i => (
-               <div key={i.id} className="flex justify-between text-sm py-1"><span>{i.className}</span> <strong>${i.feeCalculated}</strong></div>
-            ))}
-          </section>
-
-          <section className="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200">
-            <h3 className="font-bold text-orange-500 mb-4 border-b pb-2">Lateness</h3>
-            {incidents.filter(i => i.type === "LATE").map(i => (
-               <div key={i.id} className="flex justify-between text-sm py-1"><span>{i.className}</span> <strong>${i.feeCalculated}</strong></div>
-            ))}
-          </section>
-
-          <section className="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200">
-            <h3 className="font-bold text-blue-600 mb-4 border-b pb-2">Absences</h3>
-            {incidents.filter(i => i.type === "ABSENCE").map(i => (
-               <div key={i.id} className="flex justify-between text-sm py-1"><span>{i.className}</span> <strong>${i.feeCalculated}</strong></div>
-            ))}
-          </section>
-        </div>
+          
+          <div className="mb-6">
+            <label className="block text-gray-700 font-medium mb-2">Password</label>
+            <input
+              type="password"
+              className="w-full border border-gray-300 p-3 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              required
+            />
+          </div>
+          
+          <button 
+            type="submit" 
+            disabled={loading}
+            className="w-full bg-blue-600 text-white p-3 rounded font-bold hover:bg-blue-700 transition disabled:opacity-50"
+          >
+            {loading ? "Verifying..." : "Secure Log In"}
+          </button>
+        </form>
       </div>
     </div>
   );
