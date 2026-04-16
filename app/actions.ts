@@ -2,16 +2,6 @@
 
 import { PrismaClient } from "@prisma/client";
 import { revalidatePath } from "next/cache";
-import * as pdfjs from 'pdfjs-dist';
-
-// --- MAGIC FIX FOR SERVER PARSING ---
-if (typeof global.DOMMatrix === "undefined") {
-  global.DOMMatrix = class DOMMatrix {} as any;
-}
-
-// Point to the modern web-worker so Vercel doesn't have to build it
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
-// ----------------------------------------
 
 const prisma = new PrismaClient();
 
@@ -150,7 +140,17 @@ export async function processPdfForStudent(formData: FormData) {
   const arrayBuffer = await file.arrayBuffer();
 
   try {
-    // Load the PDF using the modern reader
+    // --- DYNAMIC LAZY LOAD ---
+    // 1. Add the missing pieces just in time
+    if (typeof global.DOMMatrix === "undefined") {
+      global.DOMMatrix = class DOMMatrix {} as any;
+    }
+
+    // 2. Import the PDF reader ONLY right here, hiding it from Vercel's build robot
+    const pdfjs = await import('pdfjs-dist');
+    pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+
+    // 3. Load the PDF using the modern reader
     const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
     const pdfDocument = await loadingTask.promise;
     
