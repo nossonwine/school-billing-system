@@ -5,3 +5,10 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  // This tells Turbopack to stay away from pdf-parse
+  serverExternalPackages: ['pdf-parse'],
+};
+
+export default nextConfig;
