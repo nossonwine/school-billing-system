@@ -72,9 +72,10 @@ export async function deleteClass(formData: FormData) {
 }
 
 export async function getGlobalSettings() {
-  let settings = await prisma.globalSettings.findFirst();
+  // FIX: Changed plural 'globalSettings' to singular 'globalSetting'
+  let settings = await prisma.globalSetting.findFirst();
   if (!settings) {
-    settings = await prisma.globalSettings.create({ data: { absenceFee: 5, testFailFee: 10 } });
+    settings = await prisma.globalSetting.create({ data: { absenceFee: 5, testFailFee: 10 } });
   }
   return settings;
 }
@@ -84,7 +85,8 @@ export async function saveGlobalSettings(formData: FormData) {
   const absenceFee = parseFloat(formData.get("absenceFee") as string);
   const testFailFee = parseFloat(formData.get("testFailFee") as string);
 
-  await prisma.globalSettings.update({
+  // FIX: Changed plural 'globalSettings' to singular 'globalSetting'
+  await prisma.globalSetting.update({
     where: { id },
     data: { absenceFee, testFailFee }
   });
@@ -132,7 +134,7 @@ export async function processPdfForStudent(formData: FormData) {
   const weekLabel = formData.get("weekLabel") as string;
   const file = formData.get("file") as File;
   
-  if (!file || !studentId) return { error: "Missing file or student" };
+  if (!file || !studentId) return { error: "Missing data" };
 
   try {
     const arrayBuffer = await file.arrayBuffer();
@@ -187,7 +189,6 @@ export async function processPdfForStudent(formData: FormData) {
     revalidatePath(`/students/${studentId}`);
     return { success: true, studentId };
   } catch (e) {
-    console.error(e);
-    return { error: "Failed to process PDF" };
+    return { error: "Failed" };
   }
 }
