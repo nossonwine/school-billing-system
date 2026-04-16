@@ -159,12 +159,21 @@ export async function processPdfForStudent(formData: FormData) {
 
     // 1. PULL DATABASE SETTINGS FOR ACCURATE MATH
     const classes = await prisma.classSetting.findMany();
-    const classMap = new Map(classes.map(c => [c.periodNum.toString(), c.durationMin]));
+    // Create a map to quickly look up a class name and duration by its period number
+    const classMap = new Map(classes.map(c => [c.periodNum.toString(), { name: c.hebrewName, duration: c.durationMin }]));
 
     const lines = text.split('\n');
+    let currentDate = new Date(); // Fallback date
     
     // 2. PARSE TESTS (< 70% = $10)
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // Try to catch the date right above the score in the raw text
+      const dateMatch = line.match(/(Sun|Mon|Tue|Wed|Thu|Fri|Sat),\s(\d{1,2}\/\d{1,2}\/\d{2})/);
+      if (dateMatch) {
+        currentDate = new Date(dateMatch[2]);
+      }
+
       if (line.includes("out of 100") || line.includes("%")) {
         const gradeMatch = line.match(/(\d{1,3})%/);
         if (gradeMatch) {
@@ -172,7 +181,7 @@ export async function processPdfForStudent(formData: FormData) {
           if (grade < 70) {
             await prisma.incident.create({
               data: { 
-                studentId, date: new Date(), className: "Test Score", 
+                studentId, date: currentDate, className: "בחינות (Test)", 
                 type: "FAILED_TEST", feeCalculated: 10.00, 
                 notes: `Test score of ${grade}% (Below 70%)` 
               }
@@ -182,17 +191,20 @@ export async function processPdfForStudent(formData: FormData) {
       }
     }
 
-    // 3. PARSE ATTENDANCE & LATES
-    // Look for lines that start with a Day of the week (e.g., "Thu, 8/28/25")
-    const dateRegex = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s(\d{1,2}\/\d{1,2}\/\d{2})/;
+    // 3. PARSE THE GRID (PAGE 3)
+    const gridDateRegex = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s(\d{1,2}\/\d{1,2}\/\d{2})/;
     
+    // Hardcoding the column mapping based on your PDF header logic (0, 1, 6, 2, 7, 8, 9, 10, 12, 14, 13, 15, 16, 20, 21, 22, 23)
+    // This connects the cell index to the Period Number
+    const columnToPeriodMap = ["0", "1", "6", "2", "7", "8", "9", "10", "12", "14", "13", "15", "16", "20", "21", "22", "23"];
+
     for (const line of lines) {
-      const dateMatch = line.match(dateRegex);
+      const dateMatch = line.match(gridDateRegex);
       if (!dateMatch) continue;
 
       const incidentDate = new Date(dateMatch[2]);
       
-      // Clean up the line and split by commas (since the PDF parses as CSV)
+      // Clean up the line and split by commas
       const cells = line.split('","').map(c => c.replace(/"/g, '').trim());
       
       // Skip the first cell (the date itself)
@@ -205,50 +217,56 @@ export async function processPdfForStudent(formData: FormData) {
           continue; // $0 charge, completely skipped
         }
 
-        // We assume column 16 corresponds to "22 Lights Out" based on standard reports
-        const isLightsOut = colIndex === 16; 
-        const durationMin = classMap.get(colIndex.toString()) || 60; // Default to 60m if not found
+        const periodNum = columnToPeriodMap[colIndex - 1] || "Unknown";
+        const classData = classMap.get(periodNum) || { name: `Period ${periodNum}`, duration: 60 };
+        const isLightsOut = periodNum === "22";
 
         // RULE: ABSENCES (Π)
         if (cellValue.includes('Π')) {
           const fee = isLightsOut ? 10.00 : 5.00;
           await prisma.incident.create({
             data: { 
-              studentId, date: incidentDate, className: isLightsOut ? "Lights Out" : `Period ${colIndex}`, 
+              studentId, date: incidentDate, className: classData.name, 
               type: "ABSENCE", feeCalculated: fee, notes: isLightsOut ? "Unexcused Absence (Lights Out)" : "Unexcused Absence" 
             }
           });
         } 
-        // RULE: LATES (Numbers representing minutes)
+        // RULE: LATES / LEFT EARLY (Numbers representing minutes)
         else {
-          const minutesLate = parseInt(cellValue);
-          if (!isNaN(minutesLate) && minutesLate > 0) {
-            
-            let fee = 0;
-            let note = "";
+          const minutesMatch = cellValue.match(/\d+/);
+          if (minutesMatch) {
+            const minutes = parseInt(minutesMatch[0]);
+            if (minutes > 0) {
+              let fee = 0;
+              let note = "";
 
-            if (isLightsOut) {
-              // Lights out: $1 per 10 minutes
-              fee = Math.floor(minutesLate / 10) * 1.00;
-              note = `${minutesLate} mins late to Lights Out ($1 per 10m)`;
-            } else {
-              // Standard Class Lateness
-              if (minutesLate >= durationMin / 2) {
-                fee = 3.00;
-                note = `${minutesLate} mins late (Half class missed)`;
-              } else if (minutesLate >= 5) {
-                fee = 1.00;
-                note = `${minutesLate} mins late (Passed 5m threshold)`;
-              }
-            }
-
-            if (fee > 0) {
-              await prisma.incident.create({
-                data: { 
-                  studentId, date: incidentDate, className: isLightsOut ? "Lights Out" : `Period ${colIndex}`, 
-                  type: "LATE", feeCalculated: fee, notes: note 
+              if (isLightsOut) {
+                // Lights out: $1 per 10 minutes
+                fee = Math.floor(minutes / 10) * 1.00;
+                note = `${minutes} mins late ($1 per 10m)`;
+              } else {
+                // Standard Class Lateness
+                if (minutes >= classData.duration / 2) {
+                  fee = 3.00;
+                  note = `${minutes} mins late (Half class missed)`;
+                } else if (minutes >= 5) {
+                  fee = 1.00;
+                  note = `${minutes} mins late (Passed 5m threshold)`;
+                } else {
+                   // Under 5 minutes late or left early without penalty trigger
+                   fee = 0.00;
+                   note = `${minutes} mins missed (No fee applied)`;
                 }
-              });
+              }
+
+              if (fee > 0 || note.includes("No fee applied")) {
+                await prisma.incident.create({
+                  data: { 
+                    studentId, date: incidentDate, className: classData.name, 
+                    type: "LATE/MISSED", feeCalculated: fee, notes: note 
+                  }
+                });
+              }
             }
           }
         }
