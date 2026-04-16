@@ -171,38 +171,36 @@ export async function processPdfForStudent(formData: FormData) {
       messages: [
         {
           role: "system",
-          content: `You are a strict school billing accountant. You extract attendance and test data from messy PDF text and return a JSON object with an array named "incidents".
+          content: `You are a flawless school billing data extraction engine. You read raw PDF text exports and calculate fees strictly based on these rules. 
           
-          RULES FOR PARSING:
-          1. TESTS: Look for grades with '%'. If the grade is strictly LESS THAN 70%, charge a flat $10.00 fee. (Type: "FAILED_TEST").
-          2. EXCUSED: Any attendance mark containing 'e', 'De', or '타' is EXCUSED. Ignore it completely. DO NOT add it to the JSON.
-          3. ABSENCES: The symbol 'Π' means absent. Charge $5.00. EXCEPTION: If the class is "22 Lights Out", charge $10.00. (Type: "ABSENCE").
-          4. LATES: Numbers indicate minutes late. 
-             - If the class is "22 Lights Out": Charge $1.00 for every full 10 minutes late (e.g., 20m = $2).
-             - If standard class: Check the class duration. If late >= half the duration, charge $3.00. If late >= 5 minutes (but less than half), charge $1.00. If late < 5 minutes, DO NOT charge. (Type: "LATE").
+          THE DATA FORMAT:
+          1. Test Scores (בחינות): Formatted like 'date, score, out of 100, percentage'.
+          2. Attendance Grid: Formatted with dates (e.g., 'Wed, 9/17/25') followed by symbols (Π, numbers, e). The columns represent class periods. Period 22 is 'Lights Out'.
           
-          CLASS DURATIONS: ${classRules}. Assume "22 Lights Out" is 100 minutes.
+          THE RULES:
+          - FAILED TESTS: If a percentage is strictly LESS THAN 70% (e.g., 49%, 14%), charge exactly $10.00. (Type: "TEST").
+          - EXCUSED: Any mark with 'e', 'De', or '타' is EXCUSED. Skip it completely. $0.
+          - ABSENCES: 'Π' means absent. Standard class = $5.00. Period 22 (Lights Out) = $10.00. (Type: "ABSENCE").
+          - LATES: Numbers mean minutes late. 
+             * Period 22 (Lights Out): Charge $1.00 per full 10 minutes late (e.g., 20m = $2).
+             * Standard Class: If late >= half class duration, charge $3.00. If late >= 5 minutes (but less than half), charge $1.00. Less than 5 mins = $0. (Type: "LATE").
           
-          OUTPUT FORMAT MUST BE VALID JSON:
+          CLASS DURATIONS: ${classRules}. Period 22 is 100 minutes.
+
+          RETURN STRICT JSON:
           {
             "incidents": [
-              {
-                "date": "YYYY-MM-DD",
-                "className": "string (Period # or Test)",
-                "type": "FAILED_TEST" | "ABSENCE" | "LATE",
-                "fee": number,
-                "notes": "string (Explain the calculation briefly)"
-              }
+              { "date": "YYYY-MM-DD", "className": "Class Name", "type": "TEST" | "ABSENCE" | "LATE", "fee": number, "notes": "Reasoning" }
             ]
           }`
         },
         {
           role: "user",
-          content: `Analyze this raw PDF text and extract the billable incidents:\n\n${text}`
+          content: `Extract the billable incidents from this text:\n\n${text}`
         }
       ]
     });
-
+    
     const parsedData = JSON.parse(aiResponse.choices[0].message.content || '{"incidents": []}');
     const incidents = parsedData.incidents;
 
