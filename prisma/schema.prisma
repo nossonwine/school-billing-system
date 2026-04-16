@@ -1,0 +1,71 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+url      = env("DATABASE_URL")
+}
+
+// --- AUTHENTICATION (Login System) ---
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  password  String    // Encrypted password
+  role      String    @default("PARENT") // "ADMIN" or "PARENT"
+  students  Student[] // Connects a parent to their children
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+// --- STUDENT DIRECTORY ---
+model Student {
+  id         String     @id @default(cuid())
+  name       String     // e.g., וויינפעלד, נתן הלוי
+  parentId   String?    // Link to the Parent's User Account
+  parent     User?      @relation(fields: [parentId], references: [id])
+  exemptions String?    // JSON string of exempt classes
+  customRate Float?     // Special absence rate deal
+  incidents  Incident[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+// --- SYSTEM SETTINGS ---
+model ClassSetting {
+  id          String   @id @default(cuid())
+  periodNum   Int      @unique
+  hebrewName  String   
+  durationMin Int      
+  orderIndex  Int      
+  isLightsOut Boolean  @default(false)
+}
+
+model GlobalSetting {
+  id                String @id @default(cuid())
+  absenceFee        Float  @default(5.0)  
+  lateTier1Fee      Float  @default(1.0)  
+  lateTier2Fee      Float  @default(3.0)  
+  testPassThreshold Float  @default(70.0) 
+  testFailFee       Float  @default(10.0) 
+}
+
+// --- BILLING / INCIDENTS ---
+model Incident {
+  id            String   @id @default(cuid())
+  studentId     String
+  student       Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  date          DateTime 
+  className     String   
+  type          String   // "TEST", "LATE", or "ABSENCE"
+  minutesLate   Int?     
+  testScore     Float?   
+  feeCalculated Float    
+  amountPaid    Float    @default(0.0) 
+  isExcused     Boolean  @default(false) 
+  notes         String?  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
