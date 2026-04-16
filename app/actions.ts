@@ -171,35 +171,37 @@ export async function processPdfForStudent(formData: FormData) {
       messages: [
         {
           role: "system",
-          content: `You are a flawless school billing data extraction engine. You read raw PDF text exports and calculate fees strictly based on these rules. 
+          content: `You are a strict, emotionless data extraction script for a school billing system. You receive highly compressed PDF text and output a JSON array of charges.
           
-          THE DATA FORMAT:
-          1. Test Scores (בחינות): Formatted like 'date, score, out of 100, percentage'.
-          2. Attendance Grid: Formatted with dates (e.g., 'Wed, 9/17/25') followed by symbols (Π, numbers, e). The columns represent class periods. Period 22 is 'Lights Out'.
+          MANDATORY BILLING RULES:
+          1. TESTS (בחינות): Look for percentage scores (%). If the score is strictly LESS THAN 70, charge EXACTLY $10.00. (Type: "FAILED_TEST").
+          2. EXCUSED: If you see the letters 'e', 'De', or the character '타' near an absence or late mark, it is EXCUSED. Output the fee as 0.
+          3. STANDARD ABSENCES: The symbol 'Π' means absent. If the class is NOT "Lights Out", charge exactly $5.00. (Type: "ABSENCE").
+          4. STANDARD LATES: Numbers indicate minutes late. If late is > 5 minutes, charge $1.00. (If late is more than half the class, charge $3.00). (Type: "LATE").
           
-          THE RULES:
-          - FAILED TESTS: If a percentage is strictly LESS THAN 70% (e.g., 49%, 14%), charge exactly $10.00. (Type: "TEST").
-          - EXCUSED: Any mark with 'e', 'De', or '타' is EXCUSED. Skip it completely. $0.
-          - ABSENCES: 'Π' means absent. Standard class = $5.00. Period 22 (Lights Out) = $10.00. (Type: "ABSENCE").
-          - LATES: Numbers mean minutes late. 
-             * Period 22 (Lights Out): Charge $1.00 per full 10 minutes late (e.g., 20m = $2).
-             * Standard Class: If late >= half class duration, charge $3.00. If late >= 5 minutes (but less than half), charge $1.00. Less than 5 mins = $0. (Type: "LATE").
+          "LIGHTS OUT" (PERIOD 22) SPECIAL RULES:
+          - If the class is "22 Lights Out" and marked Absent ('Π'), charge EXACTLY $10.00.
+          - If the class is "22 Lights Out" and marked Late (a number), charge EXACTLY $1.00 for EVERY full 10 minutes (e.g., 15 min = $1.00, 20 min = $2.00, 32 min = $3.00).
           
-          CLASS DURATIONS: ${classRules}. Period 22 is 100 minutes.
-
-          RETURN STRICT JSON:
+          OUTPUT FORMAT:
+          You must return ONLY valid JSON. Group the data chronologically.
           {
             "incidents": [
-              { "date": "YYYY-MM-DD", "className": "Class Name", "type": "TEST" | "ABSENCE" | "LATE", "fee": number, "notes": "Reasoning" }
+              {
+                "date": "YYYY-MM-DD",
+                "className": "string",
+                "type": "FAILED_TEST" | "ABSENCE" | "LATE",
+                "fee": number,
+                "notes": "Brief math explanation"
+              }
             ]
           }`
         },
         {
           role: "user",
-          content: `Extract the billable incidents from this text:\n\n${text}`
+          content: `Execute the billing rules on this raw text:\n\n${text}`
         }
       ]
-    });
     
     const parsedData = JSON.parse(aiResponse.choices[0].message.content || '{"incidents": []}');
     const incidents = parsedData.incidents;

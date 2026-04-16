@@ -3,7 +3,7 @@ import {
   addManualCharge, updateChargePayment, deleteCharge, processPdfForStudent 
 } from "../../actions";
 import Link from "next/link";
-import PrintButton from "@/app/components/PrintButton";
+import ExportPdfButton from "@/app/components/ExportPdfButton";
 
 export default async function StudentProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params;
@@ -78,7 +78,7 @@ export default async function StudentProfilePage({ params }: { params: Promise<{
           <p className="text-gray-500 mt-1">Student Billing Profile</p>
         </div>
         <div className="flex items-center gap-6">
-          <PrintButton />
+          <ExportPdfButton studentName={student.name} incidents={student.incidents} />
           <div className="text-right bg-blue-50 p-4 rounded-lg border border-blue-100 print:bg-white print:border-gray-300">
             <p className="text-sm text-blue-800 font-bold uppercase print:text-gray-600">Total Balance Due</p>
             <p className={`text-4xl font-extrabold ${totalDue > 0 ? 'text-red-600' : 'text-green-600'} print:text-black`}>
