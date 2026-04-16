@@ -49,7 +49,12 @@ export default async function StudentProfilePage({ params }: { params: Promise<{
           {/* --- NEW AI PDF UPLOAD SECTION --- */}
           <div className="bg-white p-6 rounded-xl shadow-sm border border-blue-200 ring-1 ring-blue-50">
             <h2 className="text-lg font-bold mb-3 border-b pb-2 text-blue-900">Upload Progress Report</h2>
-            <form action={processPdfForStudent} className="flex flex-col gap-3">
+            <form action={async (formData) => {
+    "use server";
+    await processPdfForStudent(formData);
+  }} 
+  className="flex flex-col gap-3"
+>
               <input type="hidden" name="studentId" value={student.id} />
               <input 
                 type="file" 
