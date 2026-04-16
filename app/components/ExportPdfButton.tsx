@@ -4,58 +4,50 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
 export default function ExportPdfButton({ studentName, incidents }: { studentName: string, incidents: any[] }) {
-  
   const generatePDF = () => {
     const doc = new jsPDF();
-    
-    // Header
-    doc.setFontSize(22);
-    doc.text("Student Billing Report", 14, 20);
-    doc.setFontSize(14);
-    doc.text(`Student: ${studentName}`, 14, 30);
-    doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 38);
+    doc.setFontSize(20);
+    doc.text(`Billing Statement: ${studentName}`, 14, 20);
+    doc.setFontSize(10);
+    doc.text(`Generated on ${new Date().toLocaleDateString()}`, 14, 28);
 
-    // Sort by Date (So weeks are in order)
-    const sortedIncidents = [...incidents].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    // Format Data for the Table
-    const tableData = sortedIncidents.map(inc => [
-      new Date(inc.date).toLocaleDateString(),
-      inc.className,
-      inc.type,
-      inc.isExcused ? "EXCUSED" : `$${(inc.feeCalculated || 0).toFixed(2)}`,
-      inc.notes || ""
-    ]);
-
-    // Calculate Total
-    const totalDue = sortedIncidents.reduce((sum, inc) => sum + (inc.isExcused ? 0 : inc.feeCalculated - (inc.amountPaid || 0)), 0);
-
-    // Draw the Table
-    autoTable(doc, {
-      startY: 45,
-      head: [['Date', 'Class / Period', 'Type', 'Fee', 'Notes']],
-      body: tableData,
-      theme: 'grid',
-      headStyles: { fillColor: [41, 128, 185] },
-      alternateRowStyles: { fillColor: [245, 245, 245] }
+    // Grouping logic for Weeks
+    const grouped: { [key: string]: any[] } = {};
+    incidents.forEach(inc => {
+      const match = inc.notes?.match(/\[(.*?)\]/);
+      const week = match ? match[1] : "Other Charges";
+      if (!grouped[week]) grouped[week] = [];
+      grouped[week].push(inc);
     });
 
-    // Draw Total at the bottom
-    const finalY = (doc as any).lastAutoTable.finalY || 45;
-    doc.setFontSize(16);
-    doc.setTextColor(200, 0, 0); // Red text
-    doc.text(`Total Balance Due: $${totalDue.toFixed(2)}`, 14, finalY + 15);
+    let lastY = 35;
 
-    // Download the PDF file directly!
-    doc.save(`${studentName.replace(/\s+/g, '_')}_Billing_Report.pdf`);
+    Object.keys(grouped).forEach(week => {
+      doc.setFontSize(14);
+      doc.setTextColor(44, 62, 80);
+      doc.text(week, 14, lastY + 10);
+
+      autoTable(doc, {
+        startY: lastY + 15,
+        head: [['Date', 'Class', 'Type', 'Fee']],
+        body: grouped[week].map(inc => [
+          new Date(inc.date).toLocaleDateString(),
+          inc.className,
+          inc.type,
+          inc.isExcused ? "EXCUSED" : `$${inc.feeCalculated.toFixed(2)}`
+        ]),
+        theme: 'grid',
+        headStyles: { fillColor: [52, 152, 219] },
+      });
+      lastY = (doc as any).lastAutoTable.finalY + 10;
+    });
+
+    doc.save(`${studentName}_Statement.pdf`);
   };
 
   return (
-    <button 
-      onClick={generatePDF} 
-      className="bg-green-600 text-white text-sm font-bold py-2 px-6 rounded hover:bg-green-700 shadow-sm transition"
-    >
-      ⬇️ Download Official PDF
+    <button onClick={generatePDF} className="bg-green-600 text-white px-6 py-2 rounded font-bold hover:bg-green-700">
+      ⬇️ Export Professional PDF
     </button>
   );
 }
